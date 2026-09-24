@@ -50,6 +50,35 @@ class SummaryOut(BaseModel):
     date: Optional[str] = None
 
 
+ALLOWED_STATUSES = ("Present", "Absent", "WFH", "Leave", "Half Day")
+
+
+class EmployeeCreate(BaseModel):
+    emp_id: str
+    name: str
+
+
+class EmployeeUpdate(BaseModel):
+    name: str
+
+
+class AttendanceCreate(BaseModel):
+    emp_id: str
+    date: date
+    status: str
+    check_in: Optional[time] = None
+    check_out: Optional[time] = None
+    comments: Optional[str] = None
+
+
+class AttendanceUpdate(BaseModel):
+    date: Optional[date] = None
+    status: Optional[str] = None
+    check_in: Optional[time] = None
+    check_out: Optional[time] = None
+    comments: Optional[str] = None
+
+
 class UploadRowError(BaseModel):
     row: int
     reason: str

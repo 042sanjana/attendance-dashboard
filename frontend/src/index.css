@@ -318,7 +318,88 @@ body {
   gap: 10px;
   flex-wrap: wrap;
 }
+/* ---------------- CRUD: form fields ---------------- */
+.form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
 
+.form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.form-field label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.form-input {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13.5px;
+  font-family: inherit;
+  color: var(--text-primary);
+  background: #fff;
+  outline: none;
+  width: 100%;
+}
+
+.form-input:focus { border-color: var(--brand); }
+.form-input:disabled { background: #f5f6fa; color: var(--text-secondary); }
+
+/* ---------------- CRUD: row action buttons ---------------- */
+.row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.icon-btn.sm {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+}
+
+.icon-btn.sm.danger { color: #dc2626; }
+.icon-btn.sm.danger:hover { background: #fdeded; border-color: #f6c7c7; }
+
+.danger-btn {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  background: #dc2626;
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.danger-btn:hover { background: #b91c1c; }
+.danger-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+/* ---------------- CRUD: confirm dialog ---------------- */
+.confirm-icon {
+  width: 46px; height: 46px;
+  border-radius: 50%;
+  background: #fdeded;
+  color: #dc2626;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 14px;
+}
+
+.confirm-title { text-align: center; font-size: 16px; margin: 0 0 8px; }
+.confirm-message { text-align: center; font-size: 13.5px; color: var(--text-secondary); line-height: 1.5; margin: 0; }
+
+/* ---------------- Sidebar: reset button ---------------- */
+.nav-reset { color: #f4a3a3; }
+.nav-reset:hover { background: rgba(220, 38, 38, 0.15); color: #fca5a5; }
 .search-box {
   display: flex;
   align-items: center;

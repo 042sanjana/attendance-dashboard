@@ -82,6 +82,7 @@ export default function Dashboard({ refreshKey }) {
         onSearchChange={setSearch}
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
+        onDataChanged={() => { loadDashboardData(); loadEmployees(); }}
       />
     </div>
   )

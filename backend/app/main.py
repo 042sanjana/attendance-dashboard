@@ -4,6 +4,7 @@ Employee Attendance Dashboard - FastAPI backend entry point.
 Run with:
     uvicorn app.main:app --reload --port 8000
 """
+import os
 from datetime import date as date_cls, timedelta
 from typing import Optional, List
 
@@ -16,14 +17,29 @@ from . import models, schemas
 from .database import engine, get_db
 from .excel_processor import process_excel_file
 
-# Create tables on startup
-models.Base.metadata.create_all(bind=engine)
-
 app = FastAPI(
     title="Employee Attendance Dashboard API",
     description="API for uploading and managing employee attendance data.",
     version="1.0.0",
 )
+
+# ---------------------------------------------------------------------------
+# Fresh-restart behavior
+# ---------------------------------------------------------------------------
+# When RESET_ON_STARTUP=true (the default), the database is wiped clean every
+# time the server starts, so each restart begins from an empty state (no
+# employees, no attendance, no upload history left over from a previous run).
+# Set RESET_ON_STARTUP=false (env var) if you want data to persist across
+# restarts instead -- e.g. in production:
+#     RESET_ON_STARTUP=false uvicorn app.main:app
+RESET_ON_STARTUP = os.environ.get("RESET_ON_STARTUP", "true").strip().lower() in ("1", "true", "yes")
+
+
+@app.on_event("startup")
+def on_startup():
+    if RESET_ON_STARTUP:
+        models.Base.metadata.drop_all(bind=engine)
+    models.Base.metadata.create_all(bind=engine)
 
 # Allow the React dev server (and any origin in dev) to call this API.
 app.add_middleware(
@@ -78,6 +94,25 @@ async def upload_attendance_file(file: UploadFile = File(...), db: Session = Dep
         preview_inserted=log.preview_inserted,
         preview_updated=log.preview_updated,
     )
+
+
+@app.delete("/api/reset")
+def reset_all_data(db: Session = Depends(get_db)):
+    """
+    Wipes ALL data (attendance, employees, upload history) and gives the
+    app a completely fresh start, without needing to restart the server.
+    Used by the "Reset All Data" button in the UI.
+    """
+    deleted_attendance = db.query(models.Attendance).delete()
+    deleted_employees = db.query(models.Employee).delete()
+    deleted_logs = db.query(models.UploadLog).delete()
+    db.commit()
+    return {
+        "message": "All data has been reset. The dashboard is now empty.",
+        "deleted_attendance": deleted_attendance,
+        "deleted_employees": deleted_employees,
+        "deleted_upload_logs": deleted_logs,
+    }
 
 
 @app.get("/api/uploads/history")
@@ -253,6 +288,51 @@ def get_employee_detail(emp_id: str, db: Session = Depends(get_db)):
     )
 
 
+@app.post("/api/employees", response_model=schemas.EmployeeOut, status_code=201)
+def create_employee(payload: schemas.EmployeeCreate, db: Session = Depends(get_db)):
+    """Manually add a single employee (Create). emp_id must be unique."""
+    emp_id = payload.emp_id.strip()
+    name = payload.name.strip()
+    if not emp_id or not name:
+        raise HTTPException(status_code=422, detail="emp_id and name are required.")
+
+    existing = db.get(models.Employee, emp_id)
+    if existing:
+        raise HTTPException(status_code=409, detail=f"Employee '{emp_id}' already exists.")
+
+    emp = models.Employee(emp_id=emp_id, name=name)
+    db.add(emp)
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+
+@app.put("/api/employees/{emp_id}", response_model=schemas.EmployeeOut)
+def update_employee(emp_id: str, payload: schemas.EmployeeUpdate, db: Session = Depends(get_db)):
+    """Update an employee's name (Update)."""
+    emp = db.get(models.Employee, emp_id)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="name cannot be empty.")
+    emp.name = name
+    db.commit()
+    db.refresh(emp)
+    return emp
+
+
+@app.delete("/api/employees/{emp_id}", status_code=204)
+def delete_employee(emp_id: str, db: Session = Depends(get_db)):
+    """Delete an employee and all of their attendance history (Delete)."""
+    emp = db.get(models.Employee, emp_id)
+    if not emp:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    db.delete(emp)  # cascades to attendance records (see models.py relationship)
+    db.commit()
+    return None
+
+
 @app.get("/api/attendance", response_model=List[schemas.AttendanceOut])
 def list_attendance(
     target_date: Optional[str] = Query(None, alias="date"),
@@ -268,3 +348,93 @@ def list_attendance(
     if status:
         query = query.filter(models.Attendance.status == status)
     return query.order_by(models.Attendance.date.desc()).limit(500).all()
+
+
+def _validate_status(status: str):
+    if status not in schemas.ALLOWED_STATUSES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid status '{status}'. Must be one of: {', '.join(schemas.ALLOWED_STATUSES)}",
+        )
+
+
+@app.post("/api/attendance", response_model=schemas.AttendanceOut, status_code=201)
+def create_attendance(payload: schemas.AttendanceCreate, db: Session = Depends(get_db)):
+    """Manually add a single attendance record (Create). Unique on (emp_id, date)."""
+    emp = db.get(models.Employee, payload.emp_id)
+    if not emp:
+        raise HTTPException(status_code=404, detail=f"Employee '{payload.emp_id}' does not exist.")
+
+    _validate_status(payload.status)
+
+    existing = (
+        db.query(models.Attendance)
+        .filter(models.Attendance.emp_id == payload.emp_id, models.Attendance.date == payload.date)
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"An attendance record already exists for {payload.emp_id} on {payload.date}. Use update instead.",
+        )
+
+    record = models.Attendance(
+        emp_id=payload.emp_id,
+        date=payload.date,
+        status=payload.status,
+        check_in=payload.check_in,
+        check_out=payload.check_out,
+        comments=payload.comments,
+    )
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@app.put("/api/attendance/{record_id}", response_model=schemas.AttendanceOut)
+def update_attendance(record_id: int, payload: schemas.AttendanceUpdate, db: Session = Depends(get_db)):
+    """Update an existing attendance record (Update)."""
+    record = db.get(models.Attendance, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+
+    updates = payload.model_dump(exclude_unset=True)
+    if "status" in updates and updates["status"] is not None:
+        _validate_status(updates["status"])
+
+    # If date is changing, make sure it doesn't collide with another record
+    new_date = updates.get("date", record.date)
+    if new_date != record.date:
+        clash = (
+            db.query(models.Attendance)
+            .filter(
+                models.Attendance.emp_id == record.emp_id,
+                models.Attendance.date == new_date,
+                models.Attendance.id != record.id,
+            )
+            .first()
+        )
+        if clash:
+            raise HTTPException(
+                status_code=409,
+                detail=f"{record.emp_id} already has an attendance record on {new_date}.",
+            )
+
+    for field, value in updates.items():
+        setattr(record, field, value)
+
+    db.commit()
+    db.refresh(record)
+    return record
+
+
+@app.delete("/api/attendance/{record_id}", status_code=204)
+def delete_attendance(record_id: int, db: Session = Depends(get_db)):
+    """Delete a single attendance record (Delete)."""
+    record = db.get(models.Attendance, record_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Attendance record not found")
+    db.delete(record)
+    db.commit()
+    return None

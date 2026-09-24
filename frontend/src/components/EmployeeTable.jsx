@@ -1,7 +1,10 @@
-import React from 'react'
+import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, ChevronRight } from 'lucide-react'
+import { Search, ChevronRight, UserPlus, Pencil, Trash2 } from 'lucide-react'
 import StatusBadge from './StatusBadge.jsx'
+import EmployeeFormModal from './EmployeeFormModal.jsx'
+import ConfirmDialog from './ConfirmDialog.jsx'
+import { deleteEmployee } from '../api.js'
 
 export default function EmployeeTable({
   employees,
@@ -10,8 +13,31 @@ export default function EmployeeTable({
   onSearchChange,
   selectedDate,
   onDateChange,
+  onDataChanged, // callback to refetch dashboard/employee data after a CRUD action
 }) {
   const navigate = useNavigate()
+  const [formOpen, setFormOpen] = useState(false)
+  const [editingEmployee, setEditingEmployee] = useState(null)
+  const [deleteTarget, setDeleteTarget] = useState(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const openCreate = () => { setEditingEmployee(null); setFormOpen(true) }
+  const openEdit = (emp, e) => { e.stopPropagation(); setEditingEmployee(emp); setFormOpen(true) }
+  const askDelete = (emp, e) => { e.stopPropagation(); setDeleteTarget(emp) }
+
+  const confirmDelete = async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    try {
+      await deleteEmployee(deleteTarget.emp_id)
+      setDeleteTarget(null)
+      onDataChanged?.()
+    } catch (err) {
+      alert(err?.response?.data?.detail || 'Failed to delete employee.')
+    } finally {
+      setDeleting(false)
+    }
+  }
 
   return (
     <div className="table-card" id="employees-section">
@@ -36,6 +62,9 @@ export default function EmployeeTable({
             value={selectedDate}
             onChange={(e) => onDateChange(e.target.value)}
           />
+          <button className="primary-btn" onClick={openCreate}>
+            <UserPlus size={16} /> Add Employee
+          </button>
         </div>
       </div>
 
@@ -50,7 +79,7 @@ export default function EmployeeTable({
               <th>Absent</th>
               <th>WFH</th>
               <th>Total Records</th>
-              <th></th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -61,7 +90,7 @@ export default function EmployeeTable({
             ) : employees.length === 0 ? (
               <tr>
                 <td colSpan={8} className="empty-row">
-                  No employees found. Try adjusting your search or upload an Excel file.
+                  No employees found. Try adjusting your search, or click "Add Employee" / upload an Excel file.
                 </td>
               </tr>
             ) : (
@@ -78,13 +107,40 @@ export default function EmployeeTable({
                   <td>{emp.absent_count}</td>
                   <td>{emp.wfh_count}</td>
                   <td>{emp.total_records}</td>
-                  <td className="row-arrow"><ChevronRight size={16} /></td>
+                  <td className="row-actions">
+                    <button className="icon-btn sm" title="Edit" onClick={(e) => openEdit(emp, e)}>
+                      <Pencil size={14} />
+                    </button>
+                    <button className="icon-btn sm danger" title="Delete" onClick={(e) => askDelete(emp, e)}>
+                      <Trash2 size={14} />
+                    </button>
+                    <ChevronRight size={16} className="row-arrow" />
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {formOpen && (
+        <EmployeeFormModal
+          employee={editingEmployee}
+          onClose={() => setFormOpen(false)}
+          onSuccess={() => onDataChanged?.()}
+        />
+      )}
+
+      {deleteTarget && (
+        <ConfirmDialog
+          title="Delete this employee?"
+          message={`This permanently deletes ${deleteTarget.name} (${deleteTarget.emp_id}) and their entire attendance history. This cannot be undone.`}
+          confirmLabel="Delete Employee"
+          busy={deleting}
+          onConfirm={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   )
 }

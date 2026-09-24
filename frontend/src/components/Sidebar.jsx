@@ -1,8 +1,9 @@
 import React from 'react'
 import { NavLink } from 'react-router-dom'
 import { LayoutDashboard, Users, UploadCloud, BarChart3, Building2 } from 'lucide-react'
+import ResetDataButton from './ResetDataButton.jsx'
 
-export default function Sidebar({ onUploadClick }) {
+export default function Sidebar({ onUploadClick, onReset }) {
   return (
     <aside className="sidebar">
       <div className="sidebar-brand">
@@ -30,6 +31,7 @@ export default function Sidebar({ onUploadClick }) {
           <UploadCloud size={18} />
           <span>Upload Excel</span>
         </button>
+        <ResetDataButton onReset={onReset} className="nav-item nav-reset" />
       </nav>
 
       <div className="sidebar-footer">

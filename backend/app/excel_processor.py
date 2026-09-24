@@ -29,6 +29,7 @@ VALID_STATUSES = {
     "wfh": "WFH",
     "work from home": "WFH",
     "work-from-home": "WFH",
+    "WFH":"Working From Home",
     "leave": "Leave",
     "l": "Leave",
     "on leave": "Leave",
