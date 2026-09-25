@@ -24,15 +24,18 @@ from . import models
 VALID_STATUSES = {
     "present": "Present",
     "p": "Present",
+
     "absent": "Absent",
     "a": "Absent",
+
     "wfh": "WFH",
     "work from home": "WFH",
     "work-from-home": "WFH",
-    "WFH":"Working From Home",
+
     "leave": "Leave",
     "l": "Leave",
     "on leave": "Leave",
+
     "half day": "Half Day",
     "half-day": "Half Day",
     "halfday": "Half Day",

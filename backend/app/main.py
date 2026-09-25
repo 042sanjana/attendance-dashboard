@@ -4,18 +4,31 @@ Employee Attendance Dashboard - FastAPI backend entry point.
 Run with:
     uvicorn app.main:app --reload --port 8000
 """
+
 import os
 from datetime import date as date_cls, timedelta
 from typing import Optional, List
 
-from fastapi import FastAPI, UploadFile, File, Depends, HTTPException, Query
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    Depends,
+    HTTPException,
+    Query,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
+from sqlalchemy import func
 
 from . import models, schemas
 from .database import engine, get_db
 from .excel_processor import process_excel_file
+
+
+# ============================================================
+# FASTAPI
+# ============================================================
 
 app = FastAPI(
     title="Employee Attendance Dashboard API",
@@ -23,25 +36,39 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# ---------------------------------------------------------------------------
-# Fresh-restart behavior
-# ---------------------------------------------------------------------------
-# When RESET_ON_STARTUP=true (the default), the database is wiped clean every
-# time the server starts, so each restart begins from an empty state (no
-# employees, no attendance, no upload history left over from a previous run).
-# Set RESET_ON_STARTUP=false (env var) if you want data to persist across
-# restarts instead -- e.g. in production:
-#     RESET_ON_STARTUP=false uvicorn app.main:app
-RESET_ON_STARTUP = os.environ.get("RESET_ON_STARTUP", "true").strip().lower() in ("1", "true", "yes")
+
+# ============================================================
+# DATABASE STARTUP
+# ============================================================
+
+# IMPORTANT:
+# Do NOT delete the database whenever FastAPI restarts.
+#
+# If you really want to recreate the database manually, set:
+#
+# RESET_ON_STARTUP=true
+#
+# Otherwise the default is false.
+RESET_ON_STARTUP = (
+    os.environ.get("RESET_ON_STARTUP", "false")
+    .strip()
+    .lower()
+    in ("1", "true", "yes")
+)
 
 
 @app.on_event("startup")
 def on_startup():
     if RESET_ON_STARTUP:
         models.Base.metadata.drop_all(bind=engine)
+
     models.Base.metadata.create_all(bind=engine)
 
-# Allow the React dev server (and any origin in dev) to call this API.
+
+# ============================================================
+# CORS
+# ============================================================
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -50,38 +77,74 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 ALLOWED_EXTENSIONS = (".xlsx", ".xls")
 MAX_FILE_SIZE_MB = 15
 
+
+# ============================================================
+# HEALTH
+# ============================================================
 
 @app.get("/api/health")
 def health_check():
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# Upload
-# ---------------------------------------------------------------------------
+# ============================================================
+# UPLOAD
+# ============================================================
+
 @app.post("/api/upload", response_model=schemas.UploadResult)
-async def upload_attendance_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    if not file.filename.lower().endswith(ALLOWED_EXTENSIONS):
+async def upload_attendance_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    filename = file.filename or ""
+
+    if not filename.lower().endswith(ALLOWED_EXTENSIONS):
         raise HTTPException(
             status_code=400,
-            detail=f"Invalid file type '{file.filename}'. Only .xlsx or .xls files are accepted.",
+            detail=(
+                f"Invalid file type '{filename}'. "
+                "Only .xlsx or .xls files are accepted."
+            ),
         )
 
     file_bytes = await file.read()
+
     if len(file_bytes) == 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        raise HTTPException(
+            status_code=400,
+            detail="Uploaded file is empty.",
+        )
+
     if len(file_bytes) > MAX_FILE_SIZE_MB * 1024 * 1024:
-        raise HTTPException(status_code=400, detail=f"File exceeds {MAX_FILE_SIZE_MB}MB limit.")
+        raise HTTPException(
+            status_code=400,
+            detail=f"File exceeds {MAX_FILE_SIZE_MB}MB limit.",
+        )
 
     try:
-        log = process_excel_file(db, file.filename, file_bytes)
+        log = process_excel_file(
+            db,
+            filename,
+            file_bytes,
+        )
+
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc))
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=500, detail=f"Failed to process file: {exc}")
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        )
+
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to process file: {exc}",
+        )
 
     return schemas.UploadResult(
         filename=log.filename,
@@ -90,23 +153,44 @@ async def upload_attendance_file(file: UploadFile = File(...), db: Session = Dep
         inserted_attendance=log.inserted_attendance,
         updated_attendance=log.updated_attendance,
         error_rows=log.error_rows,
-        errors=[schemas.UploadRowError(**e) for e in log.errors_list],
+        errors=[
+            schemas.UploadRowError(**e)
+            for e in log.errors_list
+        ],
         preview_inserted=log.preview_inserted,
         preview_updated=log.preview_updated,
     )
 
 
-@app.delete("/api/reset")
-def reset_all_data(db: Session = Depends(get_db)):
+# ============================================================
+# RESET ALL DATA
+# ============================================================
+
+def _perform_reset(db: Session):
     """
-    Wipes ALL data (attendance, employees, upload history) and gives the
-    app a completely fresh start, without needing to restart the server.
-    Used by the "Reset All Data" button in the UI.
+    Delete all attendance, employees and upload history.
     """
-    deleted_attendance = db.query(models.Attendance).delete()
-    deleted_employees = db.query(models.Employee).delete()
-    deleted_logs = db.query(models.UploadLog).delete()
+
+    deleted_attendance = (
+        db.query(models.Attendance).delete(
+            synchronize_session=False
+        )
+    )
+
+    deleted_employees = (
+        db.query(models.Employee).delete(
+            synchronize_session=False
+        )
+    )
+
+    deleted_logs = (
+        db.query(models.UploadLog).delete(
+            synchronize_session=False
+        )
+    )
+
     db.commit()
+
     return {
         "message": "All data has been reset. The dashboard is now empty.",
         "deleted_attendance": deleted_attendance,
@@ -115,57 +199,145 @@ def reset_all_data(db: Session = Depends(get_db)):
     }
 
 
+# POST is used by the current React ResetDataButton.
+@app.post("/api/reset")
+def reset_all_data_post(
+    db: Session = Depends(get_db),
+):
+    try:
+        return _perform_reset(db)
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset data: {exc}",
+        )
+
+
+# DELETE is also supported so both methods work.
+@app.delete("/api/reset")
+def reset_all_data_delete(
+    db: Session = Depends(get_db),
+):
+    try:
+        return _perform_reset(db)
+    except Exception as exc:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to reset data: {exc}",
+        )
+
+
+# ============================================================
+# UPLOAD HISTORY
+# ============================================================
+
 @app.get("/api/uploads/history")
-def upload_history(db: Session = Depends(get_db), limit: int = 20):
+def upload_history(
+    db: Session = Depends(get_db),
+    limit: int = Query(20, ge=1, le=100),
+):
     logs = (
         db.query(models.UploadLog)
         .order_by(models.UploadLog.uploaded_at.desc())
         .limit(limit)
         .all()
     )
+
     return [
         {
-            "id": l.id,
-            "filename": l.filename,
-            "uploaded_at": l.uploaded_at,
-            "total_rows": l.total_rows,
-            "new_employees": l.new_employees,
-            "inserted_attendance": l.inserted_attendance,
-            "updated_attendance": l.updated_attendance,
-            "error_rows": l.error_rows,
+            "id": log.id,
+            "filename": log.filename,
+            "uploaded_at": log.uploaded_at,
+            "total_rows": log.total_rows,
+            "new_employees": log.new_employees,
+            "inserted_attendance": log.inserted_attendance,
+            "updated_attendance": log.updated_attendance,
+            "error_rows": log.error_rows,
         }
-        for l in logs
+        for log in logs
     ]
 
 
-# ---------------------------------------------------------------------------
-# Dashboard summary + charts
-# ---------------------------------------------------------------------------
-def _status_counts(db: Session, target_date: Optional[date_cls]):
-    q = db.query(models.Attendance.status, func.count(models.Attendance.id))
+# ============================================================
+# DASHBOARD SUMMARY
+# ============================================================
+
+def _status_counts(
+    db: Session,
+    target_date: Optional[date_cls],
+):
+    query = db.query(
+        models.Attendance.status,
+        func.count(models.Attendance.id),
+    )
+
     if target_date:
-        q = q.filter(models.Attendance.date == target_date)
-    q = q.group_by(models.Attendance.status)
-    counts = {status: 0 for status in ("Present", "Absent", "WFH", "Leave", "Half Day")}
-    for status, cnt in q.all():
-        counts[status] = cnt
+        query = query.filter(
+            models.Attendance.date == target_date
+        )
+
+    query = query.group_by(models.Attendance.status)
+
+    counts = {
+        "Present": 0,
+        "Absent": 0,
+        "WFH": 0,
+        "Leave": 0,
+        "Half Day": 0,
+    }
+
+    for status, count in query.all():
+        if status in counts:
+            counts[status] = count
+
     return counts
 
 
-@app.get("/api/summary", response_model=schemas.SummaryOut)
-def get_summary(target_date: Optional[str] = Query(None, alias="date"), db: Session = Depends(get_db)):
+@app.get(
+    "/api/summary",
+    response_model=schemas.SummaryOut,
+)
+def get_summary(
+    target_date: Optional[str] = Query(
+        None,
+        alias="date",
+    ),
+    db: Session = Depends(get_db),
+):
     parsed_date = None
+
     if target_date:
         try:
-            parsed_date = date_cls.fromisoformat(target_date)
+            parsed_date = date_cls.fromisoformat(
+                target_date
+            )
         except ValueError:
-            raise HTTPException(status_code=400, detail="date must be in YYYY-MM-DD format")
+            raise HTTPException(
+                status_code=400,
+                detail="date must be in YYYY-MM-DD format",
+            )
     else:
-        latest = db.query(func.max(models.Attendance.date)).scalar()
-        parsed_date = latest
+        parsed_date = (
+            db.query(
+                func.max(models.Attendance.date)
+            ).scalar()
+        )
 
-    total_employees = db.query(func.count(models.Employee.emp_id)).scalar() or 0
-    counts = _status_counts(db, parsed_date)
+    total_employees = (
+        db.query(
+            func.count(models.Employee.emp_id)
+        ).scalar()
+        or 0
+    )
+
+    counts = _status_counts(
+        db,
+        parsed_date,
+    )
 
     return schemas.SummaryOut(
         total_employees=total_employees,
@@ -174,15 +346,35 @@ def get_summary(target_date: Optional[str] = Query(None, alias="date"), db: Sess
         wfh=counts["WFH"],
         leave=counts["Leave"],
         half_day=counts["Half Day"],
-        date=parsed_date.isoformat() if parsed_date else None,
+        date=(
+            parsed_date.isoformat()
+            if parsed_date
+            else None
+        ),
     )
 
 
-@app.get("/api/chart-data", response_model=List[schemas.ChartPoint])
-def get_chart_data(days: int = 14, db: Session = Depends(get_db)):
-    latest = db.query(func.max(models.Attendance.date)).scalar()
+# ============================================================
+# CHART DATA
+# ============================================================
+
+@app.get(
+    "/api/chart-data",
+    response_model=List[schemas.ChartPoint],
+)
+def get_chart_data(
+    days: int = Query(14, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    latest = (
+        db.query(
+            func.max(models.Attendance.date)
+        ).scalar()
+    )
+
     if not latest:
         return []
+
     start = latest - timedelta(days=days - 1)
 
     rows = (
@@ -191,74 +383,216 @@ def get_chart_data(days: int = 14, db: Session = Depends(get_db)):
             models.Attendance.status,
             func.count(models.Attendance.id),
         )
-        .filter(models.Attendance.date >= start, models.Attendance.date <= latest)
-        .group_by(models.Attendance.date, models.Attendance.status)
+        .filter(
+            models.Attendance.date >= start,
+            models.Attendance.date <= latest,
+        )
+        .group_by(
+            models.Attendance.date,
+            models.Attendance.status,
+        )
         .all()
     )
 
     by_date = {}
-    d = start
-    while d <= latest:
-        by_date[d.isoformat()] = {"present": 0, "absent": 0, "wfh": 0, "leave": 0, "half_day": 0}
-        d += timedelta(days=1)
 
-    key_map = {"Present": "present", "Absent": "absent", "WFH": "wfh", "Leave": "leave", "Half Day": "half_day"}
-    for d_val, status, cnt in rows:
-        iso = d_val.isoformat()
-        if iso in by_date and status in key_map:
-            by_date[iso][key_map[status]] = cnt
+    current = start
 
-    return [schemas.ChartPoint(date=k, **v) for k, v in sorted(by_date.items())]
+    while current <= latest:
+        by_date[current.isoformat()] = {
+            "present": 0,
+            "absent": 0,
+            "wfh": 0,
+            "leave": 0,
+            "half_day": 0,
+        }
 
+        current += timedelta(days=1)
+
+    key_map = {
+        "Present": "present",
+        "Absent": "absent",
+        "WFH": "wfh",
+        "Leave": "leave",
+        "Half Day": "half_day",
+    }
+
+    for record_date, status, count in rows:
+        iso = record_date.isoformat()
+
+        if (
+            iso in by_date
+            and status in key_map
+        ):
+            by_date[iso][key_map[status]] = count
+
+    return [
+        schemas.ChartPoint(
+            date=key,
+            **values,
+        )
+        for key, values
+        in sorted(by_date.items())
+    ]
+
+
+# ============================================================
+# STATUS DISTRIBUTION
+# ============================================================
 
 @app.get("/api/status-distribution")
-def get_status_distribution(target_date: Optional[str] = Query(None, alias="date"), db: Session = Depends(get_db)):
+def get_status_distribution(
+    target_date: Optional[str] = Query(
+        None,
+        alias="date",
+    ),
+    db: Session = Depends(get_db),
+):
     parsed_date = None
+
     if target_date:
-        parsed_date = date_cls.fromisoformat(target_date)
+        try:
+            parsed_date = date_cls.fromisoformat(
+                target_date
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="date must be in YYYY-MM-DD format",
+            )
     else:
-        parsed_date = db.query(func.max(models.Attendance.date)).scalar()
-    counts = _status_counts(db, parsed_date)
-    return [{"name": k, "value": v} for k, v in counts.items()]
+        parsed_date = (
+            db.query(
+                func.max(models.Attendance.date)
+            ).scalar()
+        )
+
+    counts = _status_counts(
+        db,
+        parsed_date,
+    )
+
+    return [
+        {
+            "name": key,
+            "value": value,
+        }
+        for key, value in counts.items()
+    ]
 
 
-# ---------------------------------------------------------------------------
-# Employees
-# ---------------------------------------------------------------------------
-@app.get("/api/employees", response_model=List[schemas.EmployeeWithStats])
+# ============================================================
+# EMPLOYEES - READ
+# ============================================================
+
+@app.get(
+    "/api/employees",
+    response_model=List[schemas.EmployeeWithStats],
+)
 def list_employees(
     search: Optional[str] = None,
     status: Optional[str] = None,
-    target_date: Optional[str] = Query(None, alias="date"),
+    target_date: Optional[str] = Query(
+        None,
+        alias="date",
+    ),
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Employee)
+
     if search:
-        like = f"%{search.strip()}%"
-        query = query.filter((models.Employee.name.ilike(like)) | (models.Employee.emp_id.ilike(like)))
-    employees = query.order_by(models.Employee.emp_id).all()
+        search_value = search.strip()
+
+        if search_value:
+            like = f"%{search_value}%"
+
+            query = query.filter(
+                (
+                    models.Employee.name.ilike(like)
+                )
+                |
+                (
+                    models.Employee.emp_id.ilike(like)
+                )
+            )
+
+    employees = (
+        query
+        .order_by(models.Employee.emp_id)
+        .all()
+    )
 
     parsed_date = None
+
     if target_date:
-        parsed_date = date_cls.fromisoformat(target_date)
+        try:
+            parsed_date = date_cls.fromisoformat(
+                target_date
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="date must be in YYYY-MM-DD format",
+            )
 
     result = []
+
     for emp in employees:
         records = emp.attendance_records
+
         latest = records[0] if records else None
 
-        if status and (not latest or latest.status != status):
-            # if a status filter is applied, only include matching latest status
-            if not (parsed_date and any(r.date == parsed_date and r.status == status for r in records)):
+        if status:
+            if parsed_date:
+                matches = any(
+                    record.date == parsed_date
+                    and record.status == status
+                    for record in records
+                )
+
+                if not matches:
+                    continue
+
+            elif (
+                not latest
+                or latest.status != status
+            ):
                 continue
 
         if parsed_date:
-            day_record = next((r for r in records if r.date == parsed_date), None)
-            latest_status = day_record.status if day_record else None
-            latest_date = parsed_date if day_record else None
+            day_record = next(
+                (
+                    record
+                    for record in records
+                    if record.date == parsed_date
+                ),
+                None,
+            )
+
+            latest_status = (
+                day_record.status
+                if day_record
+                else None
+            )
+
+            latest_date = (
+                parsed_date
+                if day_record
+                else None
+            )
+
         else:
-            latest_status = latest.status if latest else None
-            latest_date = latest.date if latest else None
+            latest_status = (
+                latest.status
+                if latest
+                else None
+            )
+
+            latest_date = (
+                latest.date
+                if latest
+                else None
+            )
 
         result.append(
             schemas.EmployeeWithStats(
@@ -266,116 +600,326 @@ def list_employees(
                 name=emp.name,
                 latest_status=latest_status,
                 latest_date=latest_date,
-                present_count=sum(1 for r in records if r.status == "Present"),
-                absent_count=sum(1 for r in records if r.status == "Absent"),
-                wfh_count=sum(1 for r in records if r.status == "WFH"),
-                leave_count=sum(1 for r in records if r.status == "Leave"),
+                present_count=sum(
+                    1
+                    for record in records
+                    if record.status == "Present"
+                ),
+                absent_count=sum(
+                    1
+                    for record in records
+                    if record.status == "Absent"
+                ),
+                wfh_count=sum(
+                    1
+                    for record in records
+                    if record.status == "WFH"
+                ),
+                leave_count=sum(
+                    1
+                    for record in records
+                    if record.status == "Leave"
+                ),
                 total_records=len(records),
             )
         )
+
     return result
 
 
-@app.get("/api/employees/{emp_id}", response_model=schemas.EmployeeDetail)
-def get_employee_detail(emp_id: str, db: Session = Depends(get_db)):
-    emp = db.get(models.Employee, emp_id)
+# ============================================================
+# EMPLOYEE - READ DETAIL
+# ============================================================
+
+@app.get(
+    "/api/employees/{emp_id}",
+    response_model=schemas.EmployeeDetail,
+)
+def get_employee_detail(
+    emp_id: str,
+    db: Session = Depends(get_db),
+):
+    emp = db.get(
+        models.Employee,
+        emp_id,
+    )
+
     if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Employee not found",
+        )
+
     return schemas.EmployeeDetail(
         emp_id=emp.emp_id,
         name=emp.name,
-        attendance=[schemas.AttendanceOut.model_validate(r) for r in emp.attendance_records],
+        attendance=[
+            schemas.AttendanceOut.model_validate(record)
+            for record in emp.attendance_records
+        ],
     )
 
 
-@app.post("/api/employees", response_model=schemas.EmployeeOut, status_code=201)
-def create_employee(payload: schemas.EmployeeCreate, db: Session = Depends(get_db)):
-    """Manually add a single employee (Create). emp_id must be unique."""
+# ============================================================
+# EMPLOYEE - CREATE
+# ============================================================
+
+@app.post(
+    "/api/employees",
+    response_model=schemas.EmployeeOut,
+    status_code=201,
+)
+def create_employee(
+    payload: schemas.EmployeeCreate,
+    db: Session = Depends(get_db),
+):
     emp_id = payload.emp_id.strip()
     name = payload.name.strip()
+
     if not emp_id or not name:
-        raise HTTPException(status_code=422, detail="emp_id and name are required.")
+        raise HTTPException(
+            status_code=422,
+            detail="emp_id and name are required.",
+        )
 
-    existing = db.get(models.Employee, emp_id)
+    existing = db.get(
+        models.Employee,
+        emp_id,
+    )
+
     if existing:
-        raise HTTPException(status_code=409, detail=f"Employee '{emp_id}' already exists.")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Employee '{emp_id}' already exists.",
+        )
 
-    emp = models.Employee(emp_id=emp_id, name=name)
-    db.add(emp)
-    db.commit()
-    db.refresh(emp)
-    return emp
+    employee = models.Employee(
+        emp_id=emp_id,
+        name=name,
+    )
+
+    db.add(employee)
+
+    try:
+        db.commit()
+        db.refresh(employee)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create employee.",
+        )
+
+    return employee
 
 
-@app.put("/api/employees/{emp_id}", response_model=schemas.EmployeeOut)
-def update_employee(emp_id: str, payload: schemas.EmployeeUpdate, db: Session = Depends(get_db)):
-    """Update an employee's name (Update)."""
-    emp = db.get(models.Employee, emp_id)
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
+# ============================================================
+# EMPLOYEE - UPDATE
+# ============================================================
+
+@app.put(
+    "/api/employees/{emp_id}",
+    response_model=schemas.EmployeeOut,
+)
+def update_employee(
+    emp_id: str,
+    payload: schemas.EmployeeUpdate,
+    db: Session = Depends(get_db),
+):
+    employee = db.get(
+        models.Employee,
+        emp_id,
+    )
+
+    if not employee:
+        raise HTTPException(
+            status_code=404,
+            detail="Employee not found",
+        )
+
     name = payload.name.strip()
+
     if not name:
-        raise HTTPException(status_code=422, detail="name cannot be empty.")
-    emp.name = name
-    db.commit()
-    db.refresh(emp)
-    return emp
+        raise HTTPException(
+            status_code=422,
+            detail="name cannot be empty.",
+        )
+
+    employee.name = name
+
+    try:
+        db.commit()
+        db.refresh(employee)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update employee.",
+        )
+
+    return employee
 
 
-@app.delete("/api/employees/{emp_id}", status_code=204)
-def delete_employee(emp_id: str, db: Session = Depends(get_db)):
-    """Delete an employee and all of their attendance history (Delete)."""
-    emp = db.get(models.Employee, emp_id)
-    if not emp:
-        raise HTTPException(status_code=404, detail="Employee not found")
-    db.delete(emp)  # cascades to attendance records (see models.py relationship)
-    db.commit()
+# ============================================================
+# EMPLOYEE - DELETE
+# ============================================================
+
+@app.delete(
+    "/api/employees/{emp_id}",
+    status_code=204,
+)
+def delete_employee(
+    emp_id: str,
+    db: Session = Depends(get_db),
+):
+    employee = db.get(
+        models.Employee,
+        emp_id,
+    )
+
+    if not employee:
+        raise HTTPException(
+            status_code=404,
+            detail="Employee not found",
+        )
+
+    db.delete(employee)
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete employee.",
+        )
+
     return None
 
 
-@app.get("/api/attendance", response_model=List[schemas.AttendanceOut])
+# ============================================================
+# ATTENDANCE - READ
+# ============================================================
+
+@app.get(
+    "/api/attendance",
+    response_model=List[schemas.AttendanceOut],
+)
 def list_attendance(
-    target_date: Optional[str] = Query(None, alias="date"),
+    target_date: Optional[str] = Query(
+        None,
+        alias="date",
+    ),
     emp_id: Optional[str] = None,
     status: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     query = db.query(models.Attendance)
-    if target_date:
-        query = query.filter(models.Attendance.date == date_cls.fromisoformat(target_date))
-    if emp_id:
-        query = query.filter(models.Attendance.emp_id == emp_id)
-    if status:
-        query = query.filter(models.Attendance.status == status)
-    return query.order_by(models.Attendance.date.desc()).limit(500).all()
 
+    if target_date:
+        try:
+            parsed_date = date_cls.fromisoformat(
+                target_date
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail="date must be in YYYY-MM-DD format",
+            )
+
+        query = query.filter(
+            models.Attendance.date == parsed_date
+        )
+
+    if emp_id:
+        query = query.filter(
+            models.Attendance.emp_id == emp_id
+        )
+
+    if status:
+        _validate_status(status)
+
+        query = query.filter(
+            models.Attendance.status == status
+        )
+
+    return (
+        query
+        .order_by(
+            models.Attendance.date.desc()
+        )
+        .limit(500)
+        .all()
+    )
+
+
+# ============================================================
+# ATTENDANCE STATUS VALIDATION
+# ============================================================
 
 def _validate_status(status: str):
     if status not in schemas.ALLOWED_STATUSES:
         raise HTTPException(
             status_code=422,
-            detail=f"Invalid status '{status}'. Must be one of: {', '.join(schemas.ALLOWED_STATUSES)}",
+            detail=(
+                f"Invalid status '{status}'. "
+                "Must be one of: "
+                + ", ".join(
+                    schemas.ALLOWED_STATUSES
+                )
+            ),
         )
 
 
-@app.post("/api/attendance", response_model=schemas.AttendanceOut, status_code=201)
-def create_attendance(payload: schemas.AttendanceCreate, db: Session = Depends(get_db)):
-    """Manually add a single attendance record (Create). Unique on (emp_id, date)."""
-    emp = db.get(models.Employee, payload.emp_id)
-    if not emp:
-        raise HTTPException(status_code=404, detail=f"Employee '{payload.emp_id}' does not exist.")
+# ============================================================
+# ATTENDANCE - CREATE
+# ============================================================
+
+@app.post(
+    "/api/attendance",
+    response_model=schemas.AttendanceOut,
+    status_code=201,
+)
+def create_attendance(
+    payload: schemas.AttendanceCreate,
+    db: Session = Depends(get_db),
+):
+    employee = db.get(
+        models.Employee,
+        payload.emp_id,
+    )
+
+    if not employee:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Employee '{payload.emp_id}' "
+                "does not exist."
+            ),
+        )
 
     _validate_status(payload.status)
 
     existing = (
         db.query(models.Attendance)
-        .filter(models.Attendance.emp_id == payload.emp_id, models.Attendance.date == payload.date)
+        .filter(
+            models.Attendance.emp_id
+            == payload.emp_id,
+            models.Attendance.date
+            == payload.date,
+        )
         .first()
     )
+
     if existing:
         raise HTTPException(
             status_code=409,
-            detail=f"An attendance record already exists for {payload.emp_id} on {payload.date}. Use update instead.",
+            detail=(
+                f"An attendance record already exists "
+                f"for {payload.emp_id} on {payload.date}. "
+                "Use update instead."
+            ),
         )
 
     record = models.Attendance(
@@ -386,55 +930,141 @@ def create_attendance(payload: schemas.AttendanceCreate, db: Session = Depends(g
         check_out=payload.check_out,
         comments=payload.comments,
     )
+
     db.add(record)
-    db.commit()
-    db.refresh(record)
+
+    try:
+        db.commit()
+        db.refresh(record)
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create attendance record.",
+        )
+
     return record
 
 
-@app.put("/api/attendance/{record_id}", response_model=schemas.AttendanceOut)
-def update_attendance(record_id: int, payload: schemas.AttendanceUpdate, db: Session = Depends(get_db)):
-    """Update an existing attendance record (Update)."""
-    record = db.get(models.Attendance, record_id)
+# ============================================================
+# ATTENDANCE - UPDATE
+# ============================================================
+
+@app.put(
+    "/api/attendance/{record_id}",
+    response_model=schemas.AttendanceOut,
+)
+def update_attendance(
+    record_id: int,
+    payload: schemas.AttendanceUpdate,
+    db: Session = Depends(get_db),
+):
+    record = db.get(
+        models.Attendance,
+        record_id,
+    )
+
     if not record:
-        raise HTTPException(status_code=404, detail="Attendance record not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Attendance record not found",
+        )
 
-    updates = payload.model_dump(exclude_unset=True)
-    if "status" in updates and updates["status"] is not None:
-        _validate_status(updates["status"])
+    updates = payload.model_dump(
+        exclude_unset=True
+    )
 
-    # If date is changing, make sure it doesn't collide with another record
-    new_date = updates.get("date", record.date)
+    if (
+        "status" in updates
+        and updates["status"] is not None
+    ):
+        _validate_status(
+            updates["status"]
+        )
+
+    new_date = updates.get(
+        "date",
+        record.date,
+    )
+
     if new_date != record.date:
         clash = (
             db.query(models.Attendance)
             .filter(
-                models.Attendance.emp_id == record.emp_id,
-                models.Attendance.date == new_date,
-                models.Attendance.id != record.id,
+                models.Attendance.emp_id
+                == record.emp_id,
+                models.Attendance.date
+                == new_date,
+                models.Attendance.id
+                != record.id,
             )
             .first()
         )
+
         if clash:
             raise HTTPException(
                 status_code=409,
-                detail=f"{record.emp_id} already has an attendance record on {new_date}.",
+                detail=(
+                    f"{record.emp_id} already has "
+                    f"an attendance record on {new_date}."
+                ),
             )
 
     for field, value in updates.items():
-        setattr(record, field, value)
+        setattr(
+            record,
+            field,
+            value,
+        )
 
-    db.commit()
-    db.refresh(record)
+    try:
+        db.commit()
+        db.refresh(record)
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update attendance record.",
+        )
+
     return record
 
 
-@app.delete("/api/attendance/{record_id}", status_code=204)
-def delete_attendance(record_id: int, db: Session = Depends(get_db)):
-    """Delete a single attendance record (Delete)."""
-    record = db.get(models.Attendance, record_id)
+# ============================================================
+# ATTENDANCE - DELETE
+# ============================================================
+
+@app.delete(
+    "/api/attendance/{record_id}",
+    status_code=204,
+)
+def delete_attendance(
+    record_id: int,
+    db: Session = Depends(get_db),
+):
+    record = db.get(
+        models.Attendance,
+        record_id,
+    )
+
     if not record:
-        raise HTTPException(status_code=404, detail="Attendance record not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Attendance record not found",
+        )
+
     db.delete(record)
-    db.commit()
+
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to delete attendance record.",
+        )
+
     return None

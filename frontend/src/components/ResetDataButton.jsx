@@ -3,18 +3,34 @@ import { Trash2 } from 'lucide-react'
 import ConfirmDialog from './ConfirmDialog.jsx'
 import { resetAllData } from '../api.js'
 
-export default function ResetDataButton({ onReset, className = 'nav-item' }) {
+export default function ResetDataButton({
+  onReset,
+  className = 'nav-item',
+}) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const confirm = async () => {
+    if (busy) {
+      return
+    }
+
     setBusy(true)
+
     try {
       await resetAllData()
+
       setOpen(false)
-      onReset?.()
+
+      if (onReset) {
+        await onReset()
+      }
     } catch (err) {
-      alert(err?.response?.data?.detail || 'Failed to reset data.')
+      const message =
+        err?.response?.data?.detail ||
+        'Failed to reset data.'
+
+      alert(message)
     } finally {
       setBusy(false)
     }
@@ -22,10 +38,21 @@ export default function ResetDataButton({ onReset, className = 'nav-item' }) {
 
   return (
     <>
-      <button className={className} onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={className}
+        onClick={() => setOpen(true)}
+        disabled={busy}
+      >
         <Trash2 size={18} />
-        <span>Reset All Data</span>
+
+        <span>
+          {busy
+            ? 'Resetting...'
+            : 'Reset All Data'}
+        </span>
       </button>
+
       {open && (
         <ConfirmDialog
           title="Reset all attendance data?"
@@ -33,7 +60,11 @@ export default function ResetDataButton({ onReset, className = 'nav-item' }) {
           confirmLabel="Reset Everything"
           busy={busy}
           onConfirm={confirm}
-          onCancel={() => setOpen(false)}
+          onCancel={() => {
+            if (!busy) {
+              setOpen(false)
+            }
+          }}
         />
       )}
     </>
