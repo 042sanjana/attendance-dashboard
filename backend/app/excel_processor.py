@@ -40,6 +40,15 @@ VALID_STATUSES = {
     "half-day": "Half Day",
     "halfday": "Half Day",
     "hd": "Half Day",
+    
+    "sick leave": "Sick leave",
+    "sick": "Sick leave",
+    "public holiday": "Public Holiday",
+    "public": "Public Holiday",
+    "weekly holiday": "Weekly Holiday",
+    "week off": "Weekly Holiday",
+    
+    
 }
 
 # Map many possible header spellings to a canonical internal name

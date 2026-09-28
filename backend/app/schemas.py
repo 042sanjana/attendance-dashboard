@@ -50,7 +50,7 @@ class SummaryOut(BaseModel):
     date: Optional[str] = None
 
 
-ALLOWED_STATUSES = ("Present", "Absent", "WFH", "Leave", "Half Day")
+ALLOWED_STATUSES = ("Present", "Absent", "WFH", "Leave", "Half Day","Sick leave", "Public Holiday", "Weekly Holiday")
 
 
 class EmployeeCreate(BaseModel):

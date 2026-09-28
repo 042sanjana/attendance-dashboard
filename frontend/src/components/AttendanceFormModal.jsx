@@ -2,7 +2,7 @@ import React, { useState } from 'react'
 import { X, Loader2, CalendarPlus, CalendarCog } from 'lucide-react'
 import { createAttendance, updateAttendance } from '../api.js'
 
-const STATUS_OPTIONS = ['Present', 'Absent', 'WFH', 'Leave', 'Half Day']
+const STATUS_OPTIONS = ['Present', 'Absent', 'WFH', 'Leave', 'Half Day','Sick leave','Public Holiday','Weekly Holiday']
 
 export default function AttendanceFormModal({ empId, record, onClose, onSuccess }) {
   const isEdit = Boolean(record)

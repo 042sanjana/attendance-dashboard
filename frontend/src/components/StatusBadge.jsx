@@ -6,6 +6,9 @@ const STATUS_CLASS = {
   WFH: 'badge-wfh',
   Leave: 'badge-leave',
   'Half Day': 'badge-halfday',
+  'Sick leave': 'badge-sick-leave',
+  'Public Holiday': 'badge-public-holiday',
+  'Weekly Holiday': 'badge-weekly-holiday',
 }
 
 export default function StatusBadge({ status }) {
