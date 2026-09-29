@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X, Loader2, CalendarPlus, CalendarCog } from 'lucide-react'
 import { createAttendance, updateAttendance } from '../api.js'
 
@@ -10,7 +10,10 @@ export default function AttendanceFormModal({ empId, record, onClose, onSuccess 
   const [status, setStatus] = useState(record?.status || 'Present')
   const [checkIn, setCheckIn] = useState(record?.check_in || '')
   const [checkOut, setCheckOut] = useState(record?.check_out || '')
-  const [comments, setComments] = useState(record?.comments || '')
+  const [comments, setComments] = useState('')
+  useEffect(() => {
+    setComments(record?.comments ?? '')
+  }, [record])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
 
@@ -27,7 +30,7 @@ export default function AttendanceFormModal({ empId, record, onClose, onSuccess 
       status,
       check_in: checkIn || null,
       check_out: checkOut || null,
-      comments: comments || null,
+      comments: comments
     }
     try {
       if (isEdit) {
@@ -39,10 +42,13 @@ export default function AttendanceFormModal({ empId, record, onClose, onSuccess 
 
         await onSuccess()
       }
-      
+
       onClose()
     } catch (err) {
-      setError(err?.response?.data?.detail || 'Something went wrong. Please try again.')
+      console.log('422 ERROR:', err?.response?.data)
+
+
+      setError(JSON.stringify(err?.response?.data?.detail || err?.response?.data ))
     } finally {
       setSaving(false)
     }

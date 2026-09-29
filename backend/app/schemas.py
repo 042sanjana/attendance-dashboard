@@ -3,14 +3,14 @@ Pydantic schemas used for request/response validation.
 """
 from pydantic import BaseModel, ConfigDict
 from typing import Optional, List
-from datetime import date, time, datetime
+from datetime import date as DateType,time as TimeType,datetime as DateTimeType
 
 
 class AttendanceBase(BaseModel):
-    date: date
+    date: DateType
     status: str
-    check_in: Optional[time] = None
-    check_out: Optional[time] = None
+    check_in: Optional[TimeType] = None
+    check_out: Optional[TimeType] = None
     comments: Optional[str] = None
 
 
@@ -28,7 +28,7 @@ class EmployeeOut(BaseModel):
 
 class EmployeeWithStats(EmployeeOut):
     latest_status: Optional[str] = None
-    latest_date: Optional[date] = None
+    latest_date: Optional[DateType] = None
     present_count: int = 0
     absent_count: int = 0
     wfh_count: int = 0
@@ -64,18 +64,18 @@ class EmployeeUpdate(BaseModel):
 
 class AttendanceCreate(BaseModel):
     emp_id: str
-    date: date
+    date: DateType
     status: str
-    check_in: Optional[time] = None
-    check_out: Optional[time] = None
+    check_in: Optional[TimeType] = None
+    check_out: Optional[TimeType] = None
     comments: Optional[str] = None
 
 
 class AttendanceUpdate(BaseModel):
-    date: Optional[date] = None
+    date: Optional[DateType] = None
     status: Optional[str] = None
-    check_in: Optional[time] = None
-    check_out: Optional[time] = None
+    check_in: Optional[TimeType] = None
+    check_out: Optional[TimeType] = None
     comments: Optional[str] = None
 
 
