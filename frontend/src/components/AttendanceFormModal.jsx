@@ -35,7 +35,11 @@ export default function AttendanceFormModal({ empId, record, onClose, onSuccess 
       } else {
         await createAttendance({ emp_id: empId, ...payload })
       }
-      onSuccess?.()
+      if (onSuccess){
+
+        await onSuccess()
+      }
+      
       onClose()
     } catch (err) {
       setError(err?.response?.data?.detail || 'Something went wrong. Please try again.')

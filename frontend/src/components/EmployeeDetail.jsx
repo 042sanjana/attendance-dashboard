@@ -140,7 +140,7 @@ export default function EmployeeDetail() {
           empId={empId}
           record={editingRecord}
           onClose={() => setFormOpen(false)}
-          onSuccess={() => load()}
+          onSuccess={async() => {await load()}}
         />
       )}
 

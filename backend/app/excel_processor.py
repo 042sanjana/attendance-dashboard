@@ -241,7 +241,8 @@ def process_excel_file(db: Session, filename: str, file_bytes: bytes) -> models.
                 existing.status = status
                 existing.check_in = check_in
                 existing.check_out = check_out
-                existing.comments = comments
+                if comments is not None and comments.strip()!="":
+                    existing.comments = comments  # only update if non-empty
                 updated_attendance += 1
                 if len(preview_updated) < 25:
                     preview_updated.append(record_dict)

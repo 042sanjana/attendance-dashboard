@@ -1017,7 +1017,8 @@ def update_attendance(
             field,
             value,
         )
-
+    if "comments" in updates:
+        record.comments = updates["comments"]  # Allow clearing comments
     try:
         db.commit()
         db.refresh(record)
