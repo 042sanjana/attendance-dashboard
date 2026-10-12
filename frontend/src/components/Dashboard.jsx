@@ -76,7 +76,8 @@ export default function Dashboard({ refreshKey }) {
         <AttendanceTrendChart data={trend} loading={loading} />
         <StatusPieChart data={distribution} loading={loading} />
       </div>
-
+      <AnalyticsPanel refreshKey={refreshKey } />  
+      
       <EmployeeTable
         employees={employees}
         loading={employeesLoading}
@@ -87,6 +88,9 @@ export default function Dashboard({ refreshKey }) {
         onDataChanged={() => { loadDashboardData(); loadEmployees(); setAnalyticsTick((t) => t + 1) }}
      
       />
+      {/* <-- add */}
+
+   
     </div>
   )
 }

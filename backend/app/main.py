@@ -37,6 +37,7 @@ app = FastAPI(
     description="API for uploading and managing employee attendance data.",
     version="1.0.0",
 )
+app.include_router(analytics_router) # <-- add this line
 
 
 # ============================================================
