@@ -20,6 +20,8 @@ from fastapi import (
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from sqlalchemy import func
+from .excel_processor import process_excel_file
+from .analytics import router as analytics_router      # <-- add this line
 
 from . import models, schemas
 from .database import engine, get_db

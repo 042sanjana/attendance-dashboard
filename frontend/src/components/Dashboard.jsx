@@ -4,7 +4,7 @@ import AttendanceTrendChart from './AttendanceTrendChart.jsx'
 import StatusPieChart from './StatusPieChart.jsx'
 import EmployeeTable from './EmployeeTable.jsx'
 import { getSummary, getChartData, getStatusDistribution, getEmployees } from '../api.js'
-
+import AnalyticsPanel from './AnalyticsPanel.jsx'      // <-- add
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
@@ -19,6 +19,7 @@ export default function Dashboard({ refreshKey }) {
   const [loading, setLoading] = useState(true)
   const [employeesLoading, setEmployeesLoading] = useState(true)
   const [loadError, setLoadError] = useState('')
+  const [analyticsTick, setAnalyticsTick] = useState(0)  // <-- add
 
   const loadDashboardData = useCallback(async () => {
     setLoading(true)
@@ -62,6 +63,7 @@ export default function Dashboard({ refreshKey }) {
     loadEmployees()
   }, [loadEmployees, refreshKey])
 
+  
   return (
     <div className="dashboard">
       {loadError && (
@@ -82,7 +84,8 @@ export default function Dashboard({ refreshKey }) {
         onSearchChange={setSearch}
         selectedDate={selectedDate}
         onDateChange={setSelectedDate}
-        onDataChanged={() => { loadDashboardData(); loadEmployees(); }}
+        onDataChanged={() => { loadDashboardData(); loadEmployees(); setAnalyticsTick((t) => t + 1) }}
+     
       />
     </div>
   )

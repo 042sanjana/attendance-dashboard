@@ -33,108 +33,57 @@ export const getStatusDistribution = (date) => {
 // ============================================================
 
 export const getEmployees = (params = {}) => {
-  return api.get('/employees', {
-    params,
-  })
+  return api.get('/employees', { params })
 }
 
 export const getEmployeeDetail = (empId) => {
-  return api.get(
-    `/employees/${encodeURIComponent(empId)}`
-  )
+  return api.get(`/employees/${encodeURIComponent(empId)}`)
 }
 
 export const createEmployee = (data) => {
-  return api.post(
-    '/employees',
-    data
-  )
+  return api.post('/employees', data)
 }
 
-export const updateEmployee = (
-  empId,
-  data
-) => {
-  return api.put(
-    `/employees/${encodeURIComponent(empId)}`,
-    data
-  )
+export const updateEmployee = (empId, data) => {
+  return api.put(`/employees/${encodeURIComponent(empId)}`, data)
 }
 
 export const deleteEmployee = (empId) => {
-  return api.delete(
-    `/employees/${encodeURIComponent(empId)}`
-  )
+  return api.delete(`/employees/${encodeURIComponent(empId)}`)
 }
 
 // ============================================================
 // Attendance
 // ============================================================
 
-export const getAttendance = (
-  params = {}
-) => {
-  return api.get(
-    '/attendance',
-    {
-      params,
-    }
-  )
+export const getAttendance = (params = {}) => {
+  return api.get('/attendance', { params })
 }
 
-export const createAttendance = (
-  data
-) => {
-  return api.post(
-    '/attendance',
-    data
-  )
+export const createAttendance = (data) => {
+  return api.post('/attendance', data)
 }
 
-export const updateAttendance = (
-  recordId,
-  data
-) => {
-  return api.put(
-    `/attendance/${recordId}`,
-    data
-  )
+export const updateAttendance = (recordId, data) => {
+  return api.put(`/attendance/${recordId}`, data)
 }
 
-export const deleteAttendance = (
-  recordId
-) => {
-  return api.delete(
-    `/attendance/${recordId}`
-  )
+export const deleteAttendance = (recordId) => {
+  return api.delete(`/attendance/${recordId}`)
 }
 
 // ============================================================
 // Excel Upload
 // ============================================================
 
-export const uploadFile = (
-  file,
-  onUploadProgress
-) => {
+export const uploadFile = (file, onUploadProgress) => {
   const formData = new FormData()
+  formData.append('file', file)
 
-  formData.append(
-    'file',
-    file
-  )
-
-  return api.post(
-    '/upload',
-    formData,
-    {
-      headers: {
-        'Content-Type':
-          'multipart/form-data',
-      },
-      onUploadProgress,
-    }
-  )
+  return api.post('/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    onUploadProgress,
+  })
 }
 
 // ============================================================
@@ -142,26 +91,35 @@ export const uploadFile = (
 // ============================================================
 
 export const getUploadHistory = () => {
-  return api.get(
-    '/uploads/history'
-  )
+  return api.get('/uploads/history')
 }
 
 // ============================================================
-// RESET
-// ============================================================
-//
-// React currently uses POST.
-// FastAPI now supports POST /api/reset.
-//
-// This fixes the previous:
-// 405 Method Not Allowed
+// RESET (backend supports both POST and DELETE /api/reset)
 // ============================================================
 
 export const resetAllData = () => {
-  return api.post(
-    '/reset'
-  )
+  return api.post('/reset')
+}
+
+// ============================================================
+// Analytics (filters, graphs, daily records, working hours)
+// ============================================================
+
+export const getAnalyticsFilters = () => {
+  return api.get('/analytics/filters')
+}
+
+export const getAttendanceGraph = (params = {}) => {
+  return api.get('/analytics/attendance-graph', { params })
+}
+
+export const getDailyRecords = (params = {}) => {
+  return api.get('/analytics/daily-records', { params })
+}
+
+export const getWorkingHours = (params = {}) => {
+  return api.get('/analytics/working-hours', { params })
 }
 
 export default api
